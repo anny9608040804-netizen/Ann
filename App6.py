@@ -5,7 +5,7 @@ from PIL import Image
 import io
 import base64
 import datetime
-import os 
+# import os # 移除 os 庫，因為我們改用 st.secrets
 # === [新增/修改] 導入 Google GenAI SDK ===
 from google import genai
 from google.genai import types 
@@ -243,7 +243,7 @@ NEON_ICONS_CONFIG = [
     {'id': 'swap', 'label': '交易 Swap', 'icon': SVG_ICONS['swap'], 'color': 'text-indigo-400', 'bg': 'bg-indigo-400'},
     {'id': 'news', 'label': '公告 News', 'icon': SVG_ICONS['news'], 'color': 'text-orange-400', 'bg': 'bg-orange-400'},
     {'id': 'fund', 'label': '資金 Fund', 'icon': SVG_ICONS['fund'], 'color': 'text-emerald-400', 'bg': 'bg-emerald-400'},
-    {'id': 'event', 'label': '活動 Event', 'icon': SVG_ICONS['event'], 'color': 'text-yellow-300', 'bg': 'bg-yellow-300'},
+    {'id': 'event', 'label': '活動 Event', 'color': 'text-yellow-300', 'bg': 'bg-yellow-300'},
 ]
 
 # === 工具函式 ===
@@ -289,23 +289,25 @@ def get_default_token_image(symbol):
         pass
     return None
 
-# 【已修改】AI 圖片生成接口：使用 Gemini API
+# 【已修改】AI 圖片生成接口：使用 Gemini API 和 st.secrets
 def generate_ai_image_logic(prompt: str) -> Image.Image | None:
     """
-    呼叫 Gemini API 進行圖像生成。
+    呼叫 Gemini API 進行圖像生成，透過 st.secrets 安全地讀取金鑰。
     """
     try:
-        # 確保 GEMINI_API_KEY 環境變數已設定
-        if not os.getenv("GEMINI_API_KEY"):
-            st.error("錯誤：未找到 GEMINI_API_KEY。請在終端機中設定金鑰。")
+        # 1. 安全地從 Streamlit secrets 讀取金鑰
+        gemini_api_key = st.secrets.get("GEMINI_API_KEY")
+
+        if not gemini_api_key:
+            st.error("錯誤：未找到 GEMINI_API_KEY。請參考下方的「重要步驟」來設定金鑰。")
             return None
             
-        # 初始化客戶端 (SDK會自動尋找 GEMINI_API_KEY 環境變數)
-        client = genai.Client()
+        # 2. 初始化客戶端 (將金鑰直接傳遞給 client，而不是依賴環境變數)
+        client = genai.Client(api_key=gemini_api_key)
 
         st.info(f"正在向 Gemini 提交圖像生成任務，提示詞：{prompt}")
         
-        # 組合 Neon Style 的背景圖提示詞，並指定風格
+        # 3. 組合 Neon Style 的背景圖提示詞，並指定風格
         full_prompt = (
             f"A vibrant, highly detailed, 8K image of a cryptocurrency news background. "
             f"The image should feature neon lighting, glowing trading charts, and abstract blockchain elements. "
@@ -313,19 +315,19 @@ def generate_ai_image_logic(prompt: str) -> Image.Image | None:
             f"The central theme is: {prompt}"
         )
         
-        # 呼叫 Gemini 的圖像生成服務
+        # 4. 呼叫 Gemini 的圖像生成服務
         result = client.models.generate_images(
-            model='imagen-3.0-generate-002',  # 建議使用 Imagen 3.0 或更新的模型
+            model='imagen-3.0-generate-002',  
             prompt=full_prompt,
             config=types.GenerateImagesConfig(
                 number_of_images=1,
                 output_mime_type="image/png",
-                aspect_ratio="16:9" # 或 "4:3"
+                aspect_ratio="16:9" 
             )
         )
         
         if result.generated_images:
-            # 成功生成圖片後，將 Base64 數據轉換為 PIL.Image 物件
+            # 5. 將 Base64 數據轉換為 PIL.Image 物件
             img_data = result.generated_images[0].image.image_bytes
             return Image.open(io.BytesIO(img_data))
         
@@ -338,8 +340,8 @@ def generate_ai_image_logic(prompt: str) -> Image.Image | None:
         return None
     except Exception as e:
         # 處理 API Key 錯誤或網絡錯誤
-        if "API Key" in str(e) or "authentication" in str(e):
-             st.error("錯誤：請檢查 GEMINI_API_KEY 環境變數是否已正確設定，或金鑰是否有效。")
+        if "authentication" in str(e) or "Unauthorized" in str(e):
+             st.error("API 授權失敗：請檢查您的 GEMINI_API_KEY 是否正確或已啟用。")
         else:
              st.error(f"Gemini 圖像生成發生錯誤: {e}")
         return None
@@ -501,7 +503,7 @@ for idx, item in enumerate(st.session_state.news_data):
                             st.session_state.news_data[idx]['token_image_base64'] = image_to_base64(generated_img)
                             st.success("AI 圖片生成成功！")
                         else:
-                            st.error("AI 圖片生成失敗，請檢查 API 配置。")
+                            st.error("AI 圖片生成失敗，請檢查金鑰設定。")
             
             # 顯示當前圖片
             if st.session_state.news_data[idx]['token_image_base64']:
@@ -654,6 +656,17 @@ def generate_html_preview():
             <span class="text-white ml-2 text-3xl font-bold">{st.session_state.global_settings['date']}</span>
         </h1>
         """
+    
+    # 【新增說明】如果 st.secrets 中沒有金鑰，則顯示提示
+    if not st.secrets.get("GEMINI_API_KEY"):
+        secrets_warning = """
+        <div class="bg-red-900/50 text-red-300 p-4 rounded-lg border border-red-700/50 mb-6">
+            <p class="font-bold">⚠️ Gemini API 金鑰未設定！</p>
+            <p class="text-sm mt-1">請在 Streamlit 的密鑰設定 (secrets) 中添加 GEMINI_API_KEY，否則 AI 圖片生成功能將無法使用。</p>
+        </div>
+        """
+    else:
+        secrets_warning = ""
 
     html_content = f"""
     <!DOCTYPE html>
@@ -679,6 +692,7 @@ def generate_html_preview():
         </div>
 
         <div id="capture-wrapper" class="p-2">
+            {secrets_warning}
             <div id="capture-area" class="w-[800px] bg-black px-8 pt-8 pb-12 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-visible relative">
                 <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-400 via-purple-500 to-pink-500"></div>
                 
